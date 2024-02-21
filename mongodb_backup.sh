@@ -21,7 +21,7 @@
 
 # Global variables
 BACKUP_DAY=$(date "+%Y%m%d_%H%M%S") # YYYYmmdd_HHMMSS
-ARCHIVE_FILE=
+ARCHIVE_FILE="${BACKUP_DIR}/${DBNAME}_${BACKUP_DAY}.tar.gz"
 
 #  Configure all aws variables needed for the script to work
 aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
@@ -41,11 +41,23 @@ function archive_backup() {
     cd $BACKUP_DIR || exit
     tar --use-compress-program="pigz --best --recursive" \
         -cf "$ARCHIVE_FILE" \
-        $DIR_NEXTCLOUD
+        $DBNAME
     sha256sum "$ARCHIVE_FILE" | tee -a ${DIR_BACKUP}/$CHECKSUM_FILE
 }
 
-mongodump --uri=$MONGODB_URI --db=$DBNAME
+function mongo_dump() {
+    echo "💿 Begin dump mongo database at $(date)"
+    mongodump --uri=$MONGODB_URI --db=$DBNAME --out=$BACKUP_DIR
+    echo "👍 Dump mongo database success at $(date)"
+}
+
+function upload_s3() {
+    cd $BACKUP_DIR || exit
+    echo "💿 Begin upload backup file to s3 bucket at $(date)"
+    aws s3 cp $ARCHIVE_FILE s3://$S3_BUCKET/$DBNAME/
+    echo " 📦 Uploaded to s3 bucket 😊 👍"
+}
+
 
 
 # if mongodump command is successful echo success message else echo failure message
