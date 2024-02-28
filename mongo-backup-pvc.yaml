@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-backup-pvc
+  namespace: backup-mongo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-xfs
+  resources:
+    requests:
+      storage: 400Gi

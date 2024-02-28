@@ -22,6 +22,7 @@
 # Global variables
 BACKUP_DAY=$(date "+%Y%m%d_%H%M%S") # YYYYmmdd_HHMMSS
 ARCHIVE_FILE="${BACKUP_DIR}/${DBNAME}_${BACKUP_DAY}.tar.gz"
+URL_S3_FILE="https://s3.console.aws.amazon.com/s3/object/${S3_BUCKET}?region=${AWS_DEFAULT_REGION}%26bucketType=general%26prefix=${DBNAME}/${DBNAME}_${BACKUP_DAY}.tar.gz"
 
 #  Configure all aws variables needed for the script to work
 aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
@@ -36,41 +37,83 @@ function create_dir() {
         mkdir -p "$BACKUP_DIR"
 }
 
+function hr() {
+    printf '=%.0s' {1..100}
+    printf "\n"
+}
+
+function alert_telegram() {
+    curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
+        -d chat_id=$TELEGRAM_CHAT_ID \
+        -d text="$1" \
+        -d parse_mode='HTML' \
+        -d disable_web_page_preview=true
+}
+
 # Archive folder with tar incremental and write sha256sum of backup file to file summary
 function archive_backup() {
     cd $BACKUP_DIR || exit
     tar --use-compress-program="pigz --best --recursive" \
         -cf "$ARCHIVE_FILE" \
         $DBNAME
-    sha256sum "$ARCHIVE_FILE" | tee -a ${DIR_BACKUP}/$CHECKSUM_FILE
+    if [ $? -eq 0 ]; then
+        echo " 📦 Uploaded to s3 bucket 😊 👍"
+    else
+        alert_telegram "<b>Result:</b> FAILURE backup db $DBNAME | <b>Step:</b> Archive Backup"
+        exit 1
+    fi
 }
 
 function mongo_dump() {
     echo "💿 Begin dump mongo database at $(date)"
     mongodump --uri=$MONGODB_URI --db=$DBNAME --out=$BACKUP_DIR
-    echo "👍 Dump mongo database success at $(date)"
+    if [ $? -eq 0 ]; then
+        echo "👍 Dump mongo database success at $(date)"
+    else
+        alert_telegram "<b>Result:</b> FAILURE backup db $DBNAME | <b>Step:</b> Mongo Dump"
+        exit 1
+    fi
 }
 
 function upload_s3() {
     cd $BACKUP_DIR || exit
     echo "💿 Begin upload backup file to s3 bucket at $(date)"
     aws s3 cp $ARCHIVE_FILE s3://$S3_BUCKET/$DBNAME/
-    echo " 📦 Uploaded to s3 bucket 😊 👍"
+    if [ $? -eq 0 ]; then
+        echo " 📦 Uploaded to s3 bucket 😊 👍"
+    else
+        alert_telegram "<b>Result:</b> FAILURE backup db $DBNAME | <b>Step:</b> Upload S3"
+        
+    fi
 }
 
+function clean_backup() {
+    echo "Cleaning up... 🧹"
+    cd $BACKUP_DIR && rm -rf *
+    alert_telegram "<b>Result:</b> SUCCESS backup db $DBNAME in $1 second | <b>URL:</b> $URL_S3_FILE"
+    echo "Done 🎉💯🎉"
+}
 
+#==============================================================================
+# RUN SCRIPT
+#==============================================================================
+main() {
+    SECONDS=0
+    echo "Start backup now!"
+    hr
+    create_dir
+    hr
+    mongo_dump
+    hr
+    archive_backup
+    hr
+    upload_s3
+    hr
+    clean_backup $SECONDS
+    hr
+    printf "\n"
+    echo "Elapsed Time: $SECONDS seconds"
+    printf "All backed up!\n\n"
+}
 
-# if mongodump command is successful echo success message else echo failure message
-if mongodump --uri $MONGODB_URI  --gzip --archive > ../../backup/dump_`date "+%Y-%m-%d-%T"`.gz && cd ../../ && aws s3 cp /backup/ s3://$S3_BUCKET/db_backup/ --recursive
-then
-    echo "💿 😊 👍 Backup completed successfully at $(date)"
-    echo " 📦 Uploaded to s3 bucket 😊 👍"
-else
-    echo  "📛❌📛❌ Backup failed at $(date)"
-fi
-
-echo "Cleaning up... 🧹"
-# Clean up by removing the backup folder
-rm -rf /backup/ 
-
-echo "Done 🎉💯🎉"
+main "$@"

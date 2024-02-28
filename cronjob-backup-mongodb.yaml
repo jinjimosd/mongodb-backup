@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cronjob-backup-mongodb
+  namespace: backup-mongo   # namespace where the cronjob will be deployed
+spec:
+  schedule: "05 16 * * *"   # this runs the container every 5 minutes you can change this to any time you want.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: cronjob-backup
+              image: jinjimosd/mongo-backup-s3:1.0.5
+              # command: ["/bin/bash", "-c", "sh ./mongodb_backup.sh"]       #command to run when container starts
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: backup-mongodb-secrets     #secrets stored being passed into the container as environment variables
+              volumeMounts:
+                - name: mongo-backup-pvc
+                  mountPath: /backup
+          restartPolicy: Never
+          volumes:
+          - name: mongo-backup-pvc
+            persistentVolumeClaim:
+              claimName: mongo-backup-pvc
